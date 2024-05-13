@@ -1,16 +1,18 @@
 #include <GPU_PageRank.cuh>
 
-int GRAPHSIZE;
-int *graphSize;
-int *row_point, *val_col;
-int *row_size;
-double *row_value;
-vector<double> row_value_vec;
-vector<int> val_col_vec;
-int *verticeOrder;
-int *smallOffset, *normalOffset;
-double *Rank, *diff_array, *reduce_array;
-double *newRank, *F, *temp;
+static int ITERATION;
+static int ALPHA;
+static int GRAPHSIZE;
+static int *graphSize;
+static int *row_point, *val_col;
+static int *row_size;
+static double *row_value;
+static vector<double> row_value_vec;
+static vector<int> val_col_vec;
+static int *verticeOrder;
+static int *smallOffset, *normalOffset;
+static double *Rank, *diff_array, *reduce_array;
+static double *newRank, *F, *temp;
 
 void PageRank(graph_structure<double> &graph, float *elapsedTime)
 {
@@ -90,6 +92,21 @@ void PageRank(graph_structure<double> &graph, float *elapsedTime)
     *elapsedTime += CUDAtime;
     cudaEventDestroy(GPUstart);
     cudaEventDestroy(GPUstop);
+
+    cudaFree(graphSize);
+    cudaFree(smallOffset);
+    cudaFree(normalOffset);
+    cudaFree(temp);
+    cudaFree(row_size);
+    cudaFree(row_point);
+    cudaFree(newRank);
+    cudaFree(F);
+    cudaFree(diff_array);
+    cudaFree(reduce_array);
+    cudaFree(Rank);
+    cudaFree(verticeOrder);
+    cudaFree(row_value);
+    cudaFree(val_col);
 }
 
 
