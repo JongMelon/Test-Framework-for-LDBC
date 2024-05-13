@@ -2,6 +2,7 @@
 #include <GPU_BFS.cuh>
 #include <Union-Find.cuh>
 #include <Workfront-Sweep.cuh>
+#include <GPU_PageRank.cuh>
 
 int main()
 {
@@ -39,6 +40,13 @@ int main()
         std::vector<double> sssp_result(graph.V, 0);
         Workfront_Sweep(csr_graph, graph.sssp_src, sssp_result, &elapsedTime);
         printf("GPU SSSP cost time: %f ms\n", elapsedTime);
+        elapsedTime = 0;
+    }
+
+    if (graph.sup_pr) {
+        elapsedTime = 0;
+        PageRank(graph, &elapsedTime);
+        printf("GPU PageRank cost time: %f ms\n", elapsedTime);
         elapsedTime = 0;
     }
 
