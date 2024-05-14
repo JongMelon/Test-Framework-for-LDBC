@@ -32,7 +32,7 @@ int main()
 
     clock_t start = clock(), end = clock();
 
-    if (graph.sup_bfs) {
+    /*if (graph.sup_bfs) {
         start = clock();
         CPU_BFS<double>(graph.OUTs, graph.bfs_src);
         end = clock();
@@ -43,9 +43,9 @@ int main()
         cuda_bfs(csr_graph, graph.bfs_src, &elapsedTime);
         printf("GPU BFS cost time: %f ms\n", elapsedTime);
         elapsedTime = 0;
-    }
+    }*/
 
-    if (graph.sup_wcc) {
+    /*if (graph.sup_wcc) {
         start = clock();
         CPU_connected_components<double>(graph.OUTs);
         end = clock();
@@ -56,9 +56,9 @@ int main()
         gpu_connected_components(csr_graph, &elapsedTime);
         printf("GPU WCC cost time: %f ms\n", elapsedTime);
         elapsedTime = 0;
-    }
+    }*/
 
-    if (graph.sup_sssp) {
+    /*if (graph.sup_sssp) {
         start = clock();
         std::vector<double> sssp_result;
         CPU_shortest_paths(graph.OUTs, graph.sssp_src, sssp_result);
@@ -69,9 +69,9 @@ int main()
         std::vector<double> gpu_sssp_result(graph.V, 0);
         Workfront_Sweep(csr_graph, graph.sssp_src, gpu_sssp_result, &elapsedTime);
         printf("GPU SSSP cost time: %f ms\n", elapsedTime);
-    }
+    }*/
 
-    if (graph.sup_pr) {
+    /*if (graph.sup_pr) {
         start = clock();
         CPU_PageRank(graph);
         end = clock();
@@ -80,7 +80,7 @@ int main()
         elapsedTime = 0;
         PageRank(graph, &elapsedTime);
         printf("GPU PageRank cost time: %f ms\n", elapsedTime);
-    }
+    }*/
 
     if (graph.sup_cdlp) {
         start = clock();

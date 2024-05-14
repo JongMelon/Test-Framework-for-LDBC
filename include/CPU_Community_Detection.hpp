@@ -8,48 +8,62 @@
 #include<limits>
 #include <graph_structure/graph_structure.hpp>
 using namespace std;
-static int CPU_CD_GRAPHSIZE;
+static int GRAPHSIZE;
+static int ITERAION=10;
 
+static vector<int> outs_row_ptr,ins_row_ptr, outs_neighbor,ins_neighbor; 
+static vector<int> labels,new_labels;
 
-static vector<int> cpu_cd_row_ptr, cpu_cd_col_indices; 
-static vector<int> labels;
+static vector<int>* labels_ptr = &labels;
+static vector<int>* new_labels_ptr = &new_labels;
 
 template <typename T>
-void make_csr(graph_structure<T> &graph) {
-    CPU_CD_GRAPHSIZE = graph.size();
-    // cout<<CPU_CD_GRAPHSIZE<<endl;
-    cpu_cd_row_ptr.resize(CPU_CD_GRAPHSIZE + 1);
-    cpu_cd_row_ptr[0] = 0;
-    CSR_graph<int> ARRAY_graph;
-    ARRAY_graph=graph.toCSR();
-    cpu_cd_row_ptr=ARRAY_graph.OUTs_Neighbor_start_pointers;
-    cpu_cd_col_indices=ARRAY_graph.OUTs_Edges;
-    // for (int i = 0; i < CPU_CD_GRAPHSIZE; i++) {
-    //     for (int j :graph.ADJs[i]) {
-    //         cpu_cd_col_indices.push_back(j.first);
-    //     }
-    //     cpu_cd_row_ptr[i + 1] = cpu_cd_row_ptr[i] + graph.ADJs[i].size();
-    // }
+void copy_init(graph_structure<T> &graph,int &GRAPHSIZE) {
+    
+    CSR_graph<double> ARRAY_graph;
+    ARRAY_graph = graph.toCSR();
+    GRAPHSIZE = ARRAY_graph.OUTs_Neighbor_start_pointers.size() - 1;
+    outs_row_ptr.resize(GRAPHSIZE + 1);
+    outs_row_ptr = ARRAY_graph.OUTs_Neighbor_start_pointers;
+    ins_row_ptr.resize(GRAPHSIZE + 1);
+    ins_row_ptr = ARRAY_graph.INs_Neighbor_start_pointers;
+    ins_neighbor = ARRAY_graph.INs_Edges;
+    outs_neighbor = ARRAY_graph.OUTs_Edges;
+    labels.resize(GRAPHSIZE);
+    new_labels.resize(GRAPHSIZE);
+    // cout << "CSR matrix created" << endl;
 }
 
 void init_label() {
-    for (int i = 0; i < CPU_CD_GRAPHSIZE; i++) {
+    for (int i = 0; i < GRAPHSIZE; i++) {
         labels[i] = i;
+        new_labels[i] = i;
     }
 }
 
-int findMostFrequentLabel(int start, int end) {
-    vector<int> frequencyMap(CPU_CD_GRAPHSIZE, 0);
+int findMostFrequentLabel(int outs_start, int outs_end,int ins_start,int ins_end) {
+    vector<int> frequencyMap(GRAPHSIZE+1, 0);
     int mostFre = -1, mostFreLab = -1;
-    for (int i = start; i < end; i++) {
-        int neighbor = cpu_cd_col_indices[i];
-        frequencyMap[labels[neighbor]]++;
-        if (frequencyMap[labels[neighbor]] > mostFre) {
-            mostFre = frequencyMap[labels[neighbor]];
-            mostFreLab = labels[neighbor];
+    for (int i = outs_start; i < outs_end; i++) {
+        int neighbor = outs_neighbor[i];
+        frequencyMap[(*labels_ptr)[neighbor]]++;
+        if (frequencyMap[(*labels_ptr)[neighbor]] > mostFre) {
+            mostFre = frequencyMap[(*labels_ptr)[neighbor]];
+            mostFreLab = (*labels_ptr)[neighbor];
         }
-        else if (frequencyMap[labels[neighbor]] == mostFre && labels[neighbor] < mostFreLab) {
-            mostFreLab = labels[neighbor];
+        else if (frequencyMap[(*labels_ptr)[neighbor]] == mostFre && (*labels_ptr)[neighbor] < mostFreLab) {
+            mostFreLab = (*labels_ptr)[neighbor];
+        }
+    }
+    for (int i = ins_start; i < ins_end; i++) {
+        int neighbor = ins_neighbor[i];
+        frequencyMap[(*labels_ptr)[neighbor]]++;
+        if (frequencyMap[(*labels_ptr)[neighbor]] > mostFre) {
+            mostFre = frequencyMap[(*labels_ptr)[neighbor]];
+            mostFreLab = (*labels_ptr)[neighbor];
+        }
+        else if (frequencyMap[(*labels_ptr)[neighbor]] == mostFre && (*labels_ptr)[neighbor] < mostFreLab) {
+            mostFreLab = (*labels_ptr)[neighbor];
         }
     }
 
@@ -57,39 +71,42 @@ int findMostFrequentLabel(int start, int end) {
 }
 
 void labelPropagation() {
-    bool keepUpdating = true;
-    while (keepUpdating) {
-        keepUpdating = false;
-        for (int i = 0; i < CPU_CD_GRAPHSIZE; ++i) {
-            int start = cpu_cd_row_ptr[i], end = cpu_cd_row_ptr[i + 1];
-            if (start == end) continue; 
+    int iteration=0;
+    while (iteration < ITERAION) {
+        for (int i = 0; i < GRAPHSIZE; ++i) {
+            int outs_start = outs_row_ptr[i], outs_end = outs_row_ptr[i + 1];
+            int ins_start = ins_row_ptr[i], ins_end = ins_row_ptr[i + 1];
+            // if (start == end) continue; 
 
-            int mostFrequentLabel = findMostFrequentLabel(start, end);
-            if (labels[i] != mostFrequentLabel) {
-                labels[i] = mostFrequentLabel;
-                keepUpdating = true;
+            int mostFrequentLabel = findMostFrequentLabel(outs_start, outs_end,ins_start,ins_end);
+            
+            if ((*labels_ptr)[i] != mostFrequentLabel) {
+                (*new_labels_ptr)[i] = mostFrequentLabel;
+            }
+            else {
+                (*new_labels_ptr)[i] = (*labels_ptr)[i];
             }
         }
+        swap(labels_ptr, new_labels_ptr);
+        iteration++;
     }
 }
 
 template <typename T>
 int CPU_Community_Detection(graph_structure<T>& graph) {
-    make_csr(graph, CPU_CD_GRAPHSIZE);
-    init_label();
-    labelPropagation();
+    
+    copy_init(graph, GRAPHSIZE);
 
+    ITERAION=graph.cdlp_max_its;
+    
+    //double CPUtime = 0;
+    init_label();
+    //auto start = chrono::high_resolution_clock::now();
+    labelPropagation();
+    //auto end = chrono::high_resolution_clock::now();
+    //chrono::duration<double, std::milli> duration = end - start;
+    //CPUtime += duration.count();
+    // cout << "CPU time: " << CPUtime / GRAPHSIZE << " ms" << endl;
     return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
 

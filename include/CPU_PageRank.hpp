@@ -5,18 +5,18 @@
 #include <chrono>
 #include <graph_structure/graph_structure.hpp>
 using namespace std;
-int CPU_ALPHA = 0.85;
-int CPU_ITERATION = 10;
 
-int CPU_GRAPHSIZE;
+static int ALPHA = 0.85;
+static int ITERATION = 10;
 
-vector<double> outVec;
-vector<double> value;
-vector<int> val_col_cpu;
-vector<int> row_point_cpu;
+static int GRAPHSIZE;
 
-vector<double> *multi_d_M_R(vector<double> *rankVector, double scaling);
-
+static vector<double> outVec;
+static vector<double> value;
+static vector<int> val_col_cpu;
+static vector<int> row_point_cpu;
+static vector<int> N_out_zero;
+static vector<int> row_out_point_cpu;
 
 vector<double> *multi_d_M_R(vector<double> *rankVector, double scaling)
 {
@@ -71,16 +71,20 @@ vector<double> *add_scaling(vector<double> *rankVector, double scaling)
 vector<double> *Method( vector<double> *rankVec, int &iteration)
 {
     // cout << "Method" << endl;
-    double diff = 1;
 
-
-    double d = CPU_ALPHA, d_ops = (1 - CPU_ALPHA) / CPU_GRAPHSIZE;
-    vector<double> *newRankVec = new vector<double>(CPU_GRAPHSIZE);
-    vector<double> *F = new vector<double>(CPU_GRAPHSIZE);
-    while (iteration < CPU_ITERATION)
+    double d = ALPHA, d_ops = (1 - ALPHA) / GRAPHSIZE;
+    vector<double> *newRankVec = new vector<double>(GRAPHSIZE);
+    vector<double> *F = new vector<double>(GRAPHSIZE);
+    while (iteration < ITERATION)
     {
+        double sink_sum=0;
+        for (int i=0;i<N_out_zero.size();i++)
+        {
+            sink_sum+=rankVec->at(N_out_zero[i]);
+        }
+
         F = multi_d_M_R(rankVec, d);
-        newRankVec = add_scaling(F, d_ops);
+        newRankVec = add_scaling(F, d_ops+(ALPHA/GRAPHSIZE)*sink_sum);
         // diff = vec_diff(rankVec, newRankVec);
         rankVec = newRankVec;
         iteration++;
@@ -94,25 +98,29 @@ vector<double> *Method( vector<double> *rankVec, int &iteration)
 void CPU_PageRank(graph_structure<double> &graph)
 {
     CSR_graph<double> ARRAY_graph = graph.toCSR();
-    CPU_GRAPHSIZE = ARRAY_graph.OUTs_Neighbor_start_pointers.size() - 1;
+    GRAPHSIZE = ARRAY_graph.OUTs_Neighbor_start_pointers.size() - 1;
 
     row_point_cpu = ARRAY_graph.INs_Neighbor_start_pointers;
-    
-    for (int i = 0; i < CPU_GRAPHSIZE; i++)
+    row_out_point_cpu = ARRAY_graph.OUTs_Neighbor_start_pointers;
+    for (int i = 0; i < GRAPHSIZE; i++)
     {
         for (auto it : graph.INs[i])
         {
             value.push_back(1.0 / (graph.OUTs[it.first].size()));
             val_col_cpu.push_back(it.first);
         }
+        if(row_out_point_cpu[i] == row_out_point_cpu[i + 1])
+        {
+            N_out_zero.push_back(i);
+        }
        
     }
 
     double total = 0;
-    CPU_ALPHA = graph.pr_damping;
-    CPU_ITERATION = graph.cdlp_max_its;
-    vector<double> *rank = new vector<double>(CPU_GRAPHSIZE, 1.0 / CPU_GRAPHSIZE);
-    vector<double> *ans = new vector<double>(CPU_GRAPHSIZE);
+    ALPHA = graph.pr_damping;
+    ITERATION = graph.cdlp_max_its;
+    vector<double> *rank = new vector<double>(GRAPHSIZE, 1.0 / GRAPHSIZE);
+    vector<double> *ans = new vector<double>(GRAPHSIZE);
     
     int iteration = 0;
     auto CPUstart = std::chrono::high_resolution_clock::now();
