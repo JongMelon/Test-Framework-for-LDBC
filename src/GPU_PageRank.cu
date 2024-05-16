@@ -53,7 +53,7 @@ void PageRank(graph_structure<double> &graph, float *elapsedTime)
     cudaMemcpy(N_out_zero_gpu, N_out_zero.data(),  N_out_zero.size() * sizeof(int), cudaMemcpyHostToDevice);
     out_zero_size=N_out_zero.size();
     ALPHA = graph.pr_damping;
-    ITERATION = graph.cdlp_max_its;
+    ITERATION = graph.pr_its;
     cudaMallocManaged(&row_value, row_value_vec.size() * sizeof(double));
     std::copy(row_value_vec.begin(), row_value_vec.end(), row_value);
     cudaMallocManaged(&val_col, val_col_vec.size() * sizeof(int));
@@ -75,7 +75,7 @@ void PageRank(graph_structure<double> &graph, float *elapsedTime)
     while (iteration < ITERATION)
     {
         *sink_sum=0;
-        caculate_sink<<<blockPerGrid, threadPerGrid,THREAD_PER_BLOCK*sizeof(double)>>>(Rank, N_out_zero_gpu,out_zero_size,sink_sum);
+        calculate_sink<<<blockPerGrid, threadPerGrid,THREAD_PER_BLOCK*sizeof(double)>>>(Rank, N_out_zero_gpu,out_zero_size,sink_sum);
         cudaDeviceSynchronize();
         
         tinySolve<<<blockPerGrid, threadPerGrid>>>(F, Rank, d, row_point, row_size, row_value, val_col, GRAPHSIZE);
@@ -133,33 +133,41 @@ __global__ void tinySolve(double *newRank, double *rank, double scaling, int *ro
     }
     return;
 }
+__device__ double _atomicAdd(double* address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed, 
+                        __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);
+    return __longlong_as_double(old);
+}
 
-__global__ double caculate_sink(double* rank,int* N_out_zero_gpu,int out_zero_size,double *sink_sum)
-{
+__global__ void calculate_sink(double* rank, int* N_out_zero_gpu, int out_zero_size, double* sink_sum) {
     extern __shared__ double sink[];
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int stid=threadIdx.x;
+    int stid = threadIdx.x;
 
-    if(tid<out_zero_size)
-    {
-        sink[stid]=rank[N_out_zero_gpu[tid]];
-    }else{
-        sink[stid]=0;
+    if (tid < out_zero_size) {
+        sink[stid] = rank[N_out_zero_gpu[tid]];
+    } else {
+        sink[stid] = 0;
     }
     __syncthreads();
-    for(int i=blockDim.x/2;i>0;i>>=1)
-    {
-        if(stid<i)
-        {
-            sink[stid]+=sink[stid+i];
+
+    for (int i = blockDim.x / 2; i > 0; i >>= 1) {
+        if (stid < i) {
+            sink[stid] += sink[stid + i];
         }
         __syncthreads();
     }
-    if(stid==0){
-        atomicAdd(sink_sum,sink[0]);
-    }
 
+    if (stid == 0) {
+        _atomicAdd(sink_sum, sink[0]);
+    }
 }
+
 
 // __global__ void vec_diff(double *diff, double *newRank, double *oldRank)
 // {

@@ -4,12 +4,11 @@ using namespace std;
 static int CD_GRAPHSIZE;
 static int CD_ITERATION;
 static vector<int> outs_ptr,ins_ptr, outs_neighbor,ins_neighbor;
-// static vector<int> neighbor;
+
 static int* outs_ptr_gpu,*ins_ptr_gpu;
 static int* labels_gpu, * outs_neighbor_gpu,*ins_neighbor_gpu;
 static int* reduce_label, * reduce_label_count;
 
-// static int* updating;
 
 template <typename T>
 void make_csr(graph_structure<T> &graph, int& CD_GRAPHSIZE)
@@ -23,7 +22,7 @@ void make_csr(graph_structure<T> &graph, int& CD_GRAPHSIZE)
     outs_ptr.resize(CD_GRAPHSIZE + 1);
     outs_ptr=ARRAY_graph.OUTs_Neighbor_start_pointers;
     ins_ptr.resize(CD_GRAPHSIZE + 1);
-    ins_ptr=ARRY_graph.INs_Neighbor_start_pointers;
+    ins_ptr=ARRAY_graph.INs_Neighbor_start_pointers;
 
     outs_neighbor=ARRAY_graph.OUTs_Edges;
     ins_neighbor=ARRAY_graph.INs_Edges;
@@ -40,16 +39,18 @@ __global__ void init_label(int* labels_gpu,int CD_GRAPHSIZE)
     }
 }
 
-__global__ void LPA(int* outs_ptr_gpu, int* labels_gpu, int* outs_neighbor_gpu, int* reduce_label, int* reduce_label_count,int CD_GRAPHSIZE,int BLOCK_PER_VER,int * ins_ptr_gpu,int* ins_neighbor_gpu)
+__global__ void LPA(int* outs_ptr_gpu, int* labels_gpu, int* outs_neighbor_gpu, int* reduce_label, int* reduce_label_count,int CD_GRAPHSIZE,int BLOCK_PER_VER,int * ins_ptr_gpu,int* ins_neighbor_gpu,int epoch_it,int epoch_size)
 {
-    extern __shared__ int label_counts[];
-    extern __shared__ int label[];
-    int block_order=blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    int ver = block_order / BLOCK_PER_VER;
+    extern __shared__ int shared_memory[];
+    int* label_counts = shared_memory;
+    int* label = (int*)&label_counts[blockDim.x];
+
+    int block_order=blockIdx.x;
+    int ver = block_order / BLOCK_PER_VER+epoch_it*epoch_size;
     if(ver>=CD_GRAPHSIZE) return;
     int segment_order = block_order % BLOCK_PER_VER;
     int tid = (segment_order) * blockDim.x + threadIdx.x;
-    
+
     int stid = threadIdx.x;
     if (tid == ver)
     {
@@ -97,17 +98,23 @@ __global__ void LPA(int* outs_ptr_gpu, int* labels_gpu, int* outs_neighbor_gpu, 
         }
         __syncthreads();
     }
-    reduce_label_count[block_order] = label_counts[0];
-    reduce_label[block_order] = label[0];
+    if(stid==0){
+        reduce_label_count[block_order] = label_counts[0];
+        reduce_label[block_order] = label[0];
+    }
+    
     return;
 }
 
-__global__ void Updating_label(int* reduce_label, int* reduce_label_count,  int* labels_gpu,int CD_GRAPHSIZE,int BLOCK_PER_VER)
+__global__ void Updating_label(int* reduce_label, int* reduce_label_count,  int* labels_gpu,int CD_GRAPHSIZE,int BLOCK_PER_VER,int epoch_it,int epoch_size)
 {
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
-    if (tid >= CD_GRAPHSIZE)
+    if (tid >=epoch_size)
         return;
-    int cont = 1, label = labels_gpu[tid];
+    int ver=tid+epoch_it*epoch_size;
+
+    int cont = 1, label = labels_gpu[ver];
+
     int start = tid * BLOCK_PER_VER, end = start + BLOCK_PER_VER;
     for (int i = start; i < end; ++i)
     {
@@ -122,8 +129,26 @@ __global__ void Updating_label(int* reduce_label, int* reduce_label_count,  int*
         }
     }
 
-    labels_gpu[tid] = label;
+    labels_gpu[ver] = label;
     return;
+}
+
+void checkCudaError(cudaError_t err, const char* msg) {
+    if (err != cudaSuccess) {
+        cerr << "Error: " << msg << " (" << cudaGetErrorString(err) << ")" << endl;
+        exit(EXIT_FAILURE);
+    }
+}
+
+void checkDeviceProperties() {
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    cout << "Device name: " << prop.name << endl;
+    cout << "Max threads per block: " << prop.maxThreadsPerBlock << endl;
+    cout << "Max threads per multiprocessor: " << prop.maxThreadsPerMultiProcessor << endl;
+    cout << "Max blocks per dimension: (" << prop.maxGridSize[0] << ", " << prop.maxGridSize[1] << ", " << prop.maxGridSize[2] << ")" << endl;
+    cout << "Max shared memory per block: " << prop.sharedMemPerBlock << " bytes" << endl;
+    cout << "Total global memory: " << prop.totalGlobalMem << " bytes" << endl;
 }
 
 int Community_Detection(graph_structure<double>& graph, float* elapsedTime)
@@ -131,10 +156,17 @@ int Community_Detection(graph_structure<double>& graph, float* elapsedTime)
     make_csr(graph,CD_GRAPHSIZE);
     CD_ITERATION=graph.cdlp_max_its;
     int BLOCK_PER_VER=((CD_GRAPHSIZE + CD_THREAD_PER_BLOCK - 1) / CD_THREAD_PER_BLOCK);
-    int REDUCE_BLOCK_PER_GRID=(CD_GRAPHSIZE + CD_THREAD_PER_BLOCK - 1) / CD_THREAD_PER_BLOCK;
-
+    int set_block=1e9;
+    int epoch_size=set_block/BLOCK_PER_VER;
+    int epoch_iteration=(CD_GRAPHSIZE+epoch_size-1)/epoch_size;
+    int REDUCE_BLOCK_PER_GRID=(epoch_size + CD_THREAD_PER_BLOCK - 1) / CD_THREAD_PER_BLOCK;
+    
+    cout<<"epoch_size : "<<epoch_size<<endl;
+    cout<<"epoch_iteration : "<<epoch_iteration<<endl;
+    cout<<"BLOCK_PER_VER : "<<BLOCK_PER_VER<<"  reduce_size : "<<(CD_GRAPHSIZE) * BLOCK_PER_VER<<endl;
     dim3 blockPerGrid((CD_GRAPHSIZE + CD_THREAD_PER_BLOCK - 1) / CD_THREAD_PER_BLOCK, 1, 1);
-    dim3 useBlock(1e9/BLOCK_PER_VER*BLOCK_PER_VER, 1e4, 1e4);
+    dim3 useBlock(epoch_size*BLOCK_PER_VER, 1, 1);
+
     dim3 threadPerBlock(CD_THREAD_PER_BLOCK, 1, 1);
     dim3 reduceBlock(REDUCE_BLOCK_PER_GRID, 1, 1);
 
@@ -143,29 +175,41 @@ int Community_Detection(graph_structure<double>& graph, float* elapsedTime)
     cudaMalloc(&labels_gpu, CD_GRAPHSIZE * sizeof(int));
     cudaMalloc(&outs_neighbor_gpu, outs_neighbor.size() * sizeof(int));
     cudaMalloc(&ins_neighbor_gpu, ins_neighbor.size() * sizeof(int));
-    cudaMalloc(&reduce_label, CD_GRAPHSIZE * BLOCK_PER_VER * sizeof(int));
-    cudaMalloc(&reduce_label_count, CD_GRAPHSIZE * BLOCK_PER_VER * sizeof(int));
+    cudaMalloc(&reduce_label, set_block * sizeof(int));
+    cudaMalloc(&reduce_label_count, set_block * sizeof(int));
     cudaMemcpy(outs_ptr_gpu, outs_ptr.data(), outs_ptr.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(ins_ptr_gpu, ins_ptr.data(), ins_ptr.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(outs_neighbor_gpu, outs_neighbor.data(), outs_neighbor.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(ins_neighbor_gpu, ins_neighbor.data(), ins_neighbor.size() * sizeof(int), cudaMemcpyHostToDevice);
-    // cudaMallocManaged(&updating, sizeof(int));
-    
+
+    checkDeviceProperties();
     int it=0;
-    // *updating = 1;
+
     init_label << <blockPerGrid, threadPerBlock >> > (labels_gpu,CD_GRAPHSIZE);
     cudaDeviceSynchronize();
+
     cudaEvent_t GPUstart, GPUstop;
     cudaEventCreate(&GPUstart);
     cudaEventCreate(&GPUstop);
     cudaEventRecord(GPUstart, 0);
-    while (it<CD_ITERATION)
-    {
+    cudaError_t err;
+     while (it < CD_ITERATION) {
+        cout << "iteration : " << it << endl;
         it++;
-        LPA << <useBlock, threadPerBlock, sizeof(int)* CD_THREAD_PER_BLOCK*2 >> > (outs_ptr_gpu, labels_gpu, outs_neighbor_gpu, reduce_label, reduce_label_count,CD_GRAPHSIZE,BLOCK_PER_VER,ins_ptr_gpu,ins_neighbor_gpu);
-        cudaDeviceSynchronize();
-        Updating_label << <reduceBlock, threadPerBlock >> > (reduce_label, reduce_label_count,  labels_gpu,CD_GRAPHSIZE,BLOCK_PER_VER);
-        cudaDeviceSynchronize();
+        for(int i=0;i<epoch_iteration;i++){
+            LPA <<<useBlock, threadPerBlock, sizeof(int) * CD_THREAD_PER_BLOCK * 2>>> (
+                outs_ptr_gpu, labels_gpu, outs_neighbor_gpu, reduce_label, reduce_label_count, CD_GRAPHSIZE, BLOCK_PER_VER, ins_ptr_gpu, ins_neighbor_gpu,i,epoch_size);
+            err = cudaDeviceSynchronize();
+            checkCudaError(err, "cudaDeviceSynchronize after LPA");
+
+            Updating_label <<<reduceBlock, threadPerBlock>>> (
+                reduce_label, reduce_label_count, labels_gpu, CD_GRAPHSIZE, BLOCK_PER_VER,i,epoch_size);
+            err = cudaDeviceSynchronize();
+            checkCudaError(err, "cudaDeviceSynchronize after Updating_label");
+        }
+        
+
+        
     }
 
     cudaEventRecord(GPUstop, 0);
@@ -173,7 +217,6 @@ int Community_Detection(graph_structure<double>& graph, float* elapsedTime)
 
 
     cudaEventElapsedTime(elapsedTime, GPUstart, GPUstop);
-
     cudaEventDestroy(GPUstart);
     cudaEventDestroy(GPUstop);
 

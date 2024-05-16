@@ -9,7 +9,7 @@ using namespace std;
 static int ALPHA = 0.85;
 static int ITERATION = 10;
 
-static int GRAPHSIZE;
+static int CPU_PR_GRAPHSIZE;
 
 static vector<double> outVec;
 static vector<double> value;
@@ -72,9 +72,9 @@ vector<double> *Method( vector<double> *rankVec, int &iteration)
 {
     // cout << "Method" << endl;
 
-    double d = ALPHA, d_ops = (1 - ALPHA) / GRAPHSIZE;
-    vector<double> *newRankVec = new vector<double>(GRAPHSIZE);
-    vector<double> *F = new vector<double>(GRAPHSIZE);
+    double d = ALPHA, d_ops = (1 - ALPHA) / CPU_PR_GRAPHSIZE;
+    vector<double> *newRankVec = new vector<double>(CPU_PR_GRAPHSIZE);
+    vector<double> *F = new vector<double>(CPU_PR_GRAPHSIZE);
     while (iteration < ITERATION)
     {
         double sink_sum=0;
@@ -84,7 +84,7 @@ vector<double> *Method( vector<double> *rankVec, int &iteration)
         }
 
         F = multi_d_M_R(rankVec, d);
-        newRankVec = add_scaling(F, d_ops+(ALPHA/GRAPHSIZE)*sink_sum);
+        newRankVec = add_scaling(F, d_ops+(ALPHA/CPU_PR_GRAPHSIZE)*sink_sum);
         // diff = vec_diff(rankVec, newRankVec);
         rankVec = newRankVec;
         iteration++;
@@ -98,11 +98,11 @@ vector<double> *Method( vector<double> *rankVec, int &iteration)
 void CPU_PageRank(graph_structure<double> &graph)
 {
     CSR_graph<double> ARRAY_graph = graph.toCSR();
-    GRAPHSIZE = ARRAY_graph.OUTs_Neighbor_start_pointers.size() - 1;
+    CPU_PR_GRAPHSIZE = ARRAY_graph.OUTs_Neighbor_start_pointers.size() - 1;
 
     row_point_cpu = ARRAY_graph.INs_Neighbor_start_pointers;
     row_out_point_cpu = ARRAY_graph.OUTs_Neighbor_start_pointers;
-    for (int i = 0; i < GRAPHSIZE; i++)
+    for (int i = 0; i < CPU_PR_GRAPHSIZE; i++)
     {
         for (auto it : graph.INs[i])
         {
@@ -118,9 +118,9 @@ void CPU_PageRank(graph_structure<double> &graph)
 
     double total = 0;
     ALPHA = graph.pr_damping;
-    ITERATION = graph.cdlp_max_its;
-    vector<double> *rank = new vector<double>(GRAPHSIZE, 1.0 / GRAPHSIZE);
-    vector<double> *ans = new vector<double>(GRAPHSIZE);
+    ITERATION = graph.pr_its;
+    vector<double> *rank = new vector<double>(CPU_PR_GRAPHSIZE, 1.0 / CPU_PR_GRAPHSIZE);
+    vector<double> *ans = new vector<double>(CPU_PR_GRAPHSIZE);
     
     int iteration = 0;
     auto CPUstart = std::chrono::high_resolution_clock::now();
