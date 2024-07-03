@@ -100,7 +100,6 @@ std::vector<std::vector<int>> gpu_connected_components(CSR_graph<double>& input_
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(elapsedTime, start, stop);
-    //printf("Cost time is %f\n", elapsedTime);
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
